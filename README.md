@@ -27,3 +27,8 @@ I use this shortcode on [my blog](https://www.grainsofsand.at).
 
 ## Support
 Please feel free to submit pull requests to improve this shortcode.
+
+## Icons
+
+New icons should be copied from [Material Filled
+Icons](https://icons8.com/icons/material).

@@ -95,11 +95,14 @@
         shadowUrl: "/gpx-shortcode/pin-shadow.png",
         wptIconUrls: {
          '': "/gpx-shortcode/leaflet/images/marker-icon.png",
-         'camping': "/gpx-shortcode/camping.png",
+         'camping': "/gpx-shortcode/pin-icon-camping.png",
+         'camperplace': "/gpx-shortcode/pin-icon-camperplace.png",
+         'climbing': "/gpx-shortcode/pin-icon-climbing.png",
+         'swimming': "/gpx-shortcode/pin-icon-swimming.png",
         }
       },
       // looping through all specified colours
-      polyline_options: {color: colors[index % colors.length], distanceMarkers: true, smoothFactor: 0.5 }
+  polyline_options: {color: colors[index % colors.length], distanceMarkers: true, smoothFactor: 0.5 },
     }).on("loaded", function(e) {
       var gpx = e.target;
       if (bounds === null) {
@@ -112,7 +115,7 @@
       map.fitBounds(bounds);
       control.addOverlay(gpx, gpx.get_name());
       addMetadata(gpx, url);
-    });
+  });
     layers[index].addTo(map);
   }
 
