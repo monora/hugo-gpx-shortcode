@@ -1,0 +1,114 @@
+{{ $geojson := .Get "geojson" }}
+{{ $height := .Get "height" | default "450px" }}
+{{ $id := printf "map-%s" ($geojson | md5) }}
+
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
+<style>
+.map-tooltip .maplibregl-popup-content {
+  background: rgba(0,0,0,0.75);
+  color: #fff;
+  padding: 3px 8px;
+  font-size: 12px;
+  border-radius: 3px;
+  box-shadow: none;
+}
+.map-tooltip .maplibregl-popup-tip { display: none; }
+.map-popup .maplibregl-popup-content {
+  background: rgba(0,0,0,0.75);
+  color: #fff;
+  padding: 8px;
+  font-size: 12px;
+  border-radius: 3px;
+  box-shadow: none;
+}
+.map-popup .maplibregl-popup-content a { color: #fff; }
+.map-popup .maplibregl-popup-tip { border-top-color: rgba(0,0,0,0.75); }
+</style>
+<script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+
+<div id="{{ $id }}" style="height: {{ $height }}; width: 100%;"></div>
+
+<script>
+(function () {
+  var map = new maplibregl.Map({
+    container: '{{ $id }}',
+    style: 'https://tiles.openfreemap.org/styles/liberty',
+    zoom: 5
+  });
+  map.addControl(new maplibregl.FullscreenControl());
+  map.addControl(new maplibregl.NavigationControl());
+
+  map.on('load', function () {
+    fetch('{{ $geojson }}')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        map.addSource('geo', { type: 'geojson', data: data });
+
+        map.addLayer({
+          id: 'routes', type: 'line', source: 'geo',
+          filter: ['==', '$type', 'LineString'],
+          paint: { 'line-color': ['get', 'color'], 'line-width': 2, 'line-opacity': 0.8 }
+        });
+
+        map.addLayer({
+          id: 'points', type: 'circle', source: 'geo',
+          filter: ['==', '$type', 'Point'],
+          paint: {
+            'circle-radius': 6,
+            'circle-color': '#cc0055',
+            'circle-stroke-width': 1,
+            'circle-stroke-color': '#fff'
+          }
+        });
+
+        map.addLayer({
+          id: 'point-icons', type: 'symbol', source: 'geo',
+          filter: ['all', ['==', '$type', 'Point'], ['has', 'maki']],
+          layout: {
+            'icon-image': ['get', 'maki'],
+            'icon-size': 0.8,
+            'icon-allow-overlap': true,
+          }
+        });
+
+        var tooltip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, className: 'map-tooltip' });
+
+        function showTooltip(e) {
+          map.getCanvas().style.cursor = 'pointer';
+          var f = e.features[0];
+          tooltip.setLngLat(f.geometry.coordinates)
+            .setText(f.properties.name)
+            .addTo(map);
+        }
+        function hideTooltip() {
+          map.getCanvas().style.cursor = '';
+          tooltip.remove();
+        }
+        function showPopup(e) {
+          var f = e.features[0];
+          tooltip.remove();
+          new maplibregl.Popup({ className: 'map-popup' })
+            .setLngLat(f.geometry.coordinates)
+            .setHTML('<b>' + f.properties.name + '</b><br>' + (f.properties.description || ''))
+            .addTo(map);
+        }
+
+        ['points', 'point-icons'].forEach(function (layer) {
+          map.on('mouseenter', layer, showTooltip);
+          map.on('mouseleave', layer, hideTooltip);
+          map.on('click', layer, showPopup);
+        });
+
+        var bounds = new maplibregl.LngLatBounds();
+        data.features.forEach(function (f) {
+          if (!f.geometry) { return; }
+          var coords = f.geometry.type === 'Point'
+            ? [f.geometry.coordinates]
+            : f.geometry.coordinates;
+          coords.forEach(function (c) { bounds.extend(c); });
+        });
+        if (!bounds.isEmpty()) { map.fitBounds(bounds, { padding: 50, animate: false }); }
+      });
+  });
+}());
+</script>
