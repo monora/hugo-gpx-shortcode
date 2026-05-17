@@ -2,6 +2,18 @@
 {{ $height := .Get "height" | default "450px" }}
 {{ $id := printf "map-%s" ($geojson | md5) }}
 
+{{/* GPX-Tracks aus demselben Verzeichnis wie die GeoJSON-Datei */}}
+{{ $dir := path.Dir $geojson }}
+{{ $gpxUrls := slice }}
+{{ $staticDir := printf "static%s" $dir }}
+{{ if fileExists $staticDir }}
+  {{ range readDir $staticDir }}
+    {{ if strings.HasSuffix .Name ".gpx" }}
+      {{ $gpxUrls = $gpxUrls | append (printf "%s/%s" $dir .Name) }}
+    {{ end }}
+  {{ end }}
+{{ end }}
+
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
 <style>
 .map-tooltip .maplibregl-popup-content {
@@ -30,6 +42,30 @@
 
 <script>
 (function () {
+  var gpxUrls = [{{ range $i, $url := $gpxUrls }}{{ if $i }},{{ end }}"{{ $url }}"{{ end }}];
+  var colors = ['Red','Blue','Green','BlueViolet','Maroon','DarkGreen','Indigo','OrangeRed','DarkBlue','DarkSlateGray'];
+
+  function gpxToGeoJson(xmlStr) {
+    var doc = new DOMParser().parseFromString(xmlStr, 'text/xml');
+    var features = [];
+    doc.querySelectorAll('trk').forEach(function (trk) {
+      var nameEl = trk.querySelector('name');
+      trk.querySelectorAll('trkseg').forEach(function (seg) {
+        var coords = Array.from(seg.querySelectorAll('trkpt')).map(function (pt) {
+          return [parseFloat(pt.getAttribute('lon')), parseFloat(pt.getAttribute('lat'))];
+        });
+        if (coords.length > 1) {
+          features.push({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: coords },
+            properties: { name: nameEl ? nameEl.textContent : '' }
+          });
+        }
+      });
+    });
+    return { type: 'FeatureCollection', features: features };
+  }
+
   var map = new maplibregl.Map({
     container: '{{ $id }}',
     style: 'https://tiles.openfreemap.org/styles/liberty',
@@ -39,76 +75,100 @@
   map.addControl(new maplibregl.NavigationControl());
 
   map.on('load', function () {
-    fetch('{{ $geojson }}')
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        map.addSource('geo', { type: 'geojson', data: data });
+    var geojsonP = fetch('{{ $geojson }}').then(function (r) { return r.json(); });
+    var gpxPromises = gpxUrls.map(function (url) {
+      return fetch(url).then(function (r) { return r.text(); });
+    });
 
-        map.addLayer({
-          id: 'routes', type: 'line', source: 'geo',
-          filter: ['==', '$type', 'LineString'],
-          paint: { 'line-color': ['get', 'color'], 'line-width': 2, 'line-opacity': 0.8 }
-        });
+    Promise.all([geojsonP].concat(gpxPromises)).then(function (results) {
+      var data = results[0];
+      var gpxTexts = results.slice(1);
 
+      map.addSource('geo', { type: 'geojson', data: data });
+
+      map.addLayer({
+        id: 'routes', type: 'line', source: 'geo',
+        filter: ['==', '$type', 'LineString'],
+        paint: { 'line-color': ['get', 'color'], 'line-width': 3, 'line-opacity': 0.85 }
+      });
+
+      map.addLayer({
+        id: 'points', type: 'circle', source: 'geo',
+        filter: ['==', '$type', 'Point'],
+        paint: {
+          'circle-radius': 6,
+          'circle-color': '#cc0055',
+          'circle-stroke-width': 1,
+          'circle-stroke-color': '#fff'
+        }
+      });
+
+      map.addLayer({
+        id: 'point-icons', type: 'symbol', source: 'geo',
+        filter: ['all', ['==', '$type', 'Point'], ['has', 'maki']],
+        layout: {
+          'icon-image': ['get', 'maki'],
+          'icon-size': 0.8,
+          'icon-allow-overlap': true
+        }
+      });
+
+      var parsedGpx = gpxTexts.map(gpxToGeoJson);
+      parsedGpx.forEach(function (gpxGeo, idx) {
+        var srcId = 'gpx-' + idx;
+        map.addSource(srcId, { type: 'geojson', data: gpxGeo });
         map.addLayer({
-          id: 'points', type: 'circle', source: 'geo',
-          filter: ['==', '$type', 'Point'],
+          id: srcId + '-line', type: 'line', source: srcId,
           paint: {
-            'circle-radius': 6,
-            'circle-color': '#cc0055',
-            'circle-stroke-width': 1,
-            'circle-stroke-color': '#fff'
+            'line-color': colors[idx % colors.length],
+            'line-width': 2,
+            'line-opacity': 0.65,
+            'line-dasharray': [3, 1]
           }
         });
+      });
 
-        map.addLayer({
-          id: 'point-icons', type: 'symbol', source: 'geo',
-          filter: ['all', ['==', '$type', 'Point'], ['has', 'maki']],
-          layout: {
-            'icon-image': ['get', 'maki'],
-            'icon-size': 0.8,
-            'icon-allow-overlap': true,
-          }
-        });
+      var tooltip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, className: 'map-tooltip' });
 
-        var tooltip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, className: 'map-tooltip' });
+      function showTooltip(e) {
+        map.getCanvas().style.cursor = 'pointer';
+        var f = e.features[0];
+        tooltip.setLngLat(f.geometry.coordinates)
+          .setText(f.properties.name)
+          .addTo(map);
+      }
+      function hideTooltip() {
+        map.getCanvas().style.cursor = '';
+        tooltip.remove();
+      }
+      function showPopup(e) {
+        var f = e.features[0];
+        tooltip.remove();
+        new maplibregl.Popup({ className: 'map-popup' })
+          .setLngLat(f.geometry.coordinates)
+          .setHTML('<b>' + f.properties.name + '</b><br>' + (f.properties.description || ''))
+          .addTo(map);
+      }
 
-        function showTooltip(e) {
-          map.getCanvas().style.cursor = 'pointer';
-          var f = e.features[0];
-          tooltip.setLngLat(f.geometry.coordinates)
-            .setText(f.properties.name)
-            .addTo(map);
-        }
-        function hideTooltip() {
-          map.getCanvas().style.cursor = '';
-          tooltip.remove();
-        }
-        function showPopup(e) {
-          var f = e.features[0];
-          tooltip.remove();
-          new maplibregl.Popup({ className: 'map-popup' })
-            .setLngLat(f.geometry.coordinates)
-            .setHTML('<b>' + f.properties.name + '</b><br>' + (f.properties.description || ''))
-            .addTo(map);
-        }
+      ['points', 'point-icons'].forEach(function (layer) {
+        map.on('mouseenter', layer, showTooltip);
+        map.on('mouseleave', layer, hideTooltip);
+        map.on('click', layer, showPopup);
+      });
 
-        ['points', 'point-icons'].forEach(function (layer) {
-          map.on('mouseenter', layer, showTooltip);
-          map.on('mouseleave', layer, hideTooltip);
-          map.on('click', layer, showPopup);
-        });
-
-        var bounds = new maplibregl.LngLatBounds();
-        data.features.forEach(function (f) {
+      var bounds = new maplibregl.LngLatBounds();
+      var allGeoJson = [data].concat(parsedGpx);
+      allGeoJson.forEach(function (fc) {
+        fc.features.forEach(function (f) {
           if (!f.geometry) { return; }
           var coords = f.geometry.type === 'Point'
             ? [f.geometry.coordinates]
             : f.geometry.coordinates;
           coords.forEach(function (c) { bounds.extend(c); });
         });
-        if (!bounds.isEmpty()) { map.fitBounds(bounds, { padding: 50, animate: false }); }
       });
+      if (!bounds.isEmpty()) { map.fitBounds(bounds, { padding: 50, animate: false }); }
+    });
   });
 }());
 </script>
