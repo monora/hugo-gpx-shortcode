@@ -114,11 +114,14 @@
       });
 
       var parsedGpx = gpxTexts.map(gpxToGeoJson);
+      var gpxLayerIds = [];
       parsedGpx.forEach(function (gpxGeo, idx) {
         var srcId = 'gpx-' + idx;
         map.addSource(srcId, { type: 'geojson', data: gpxGeo });
+        var layerId = srcId + '-line';
+        gpxLayerIds.push(layerId);
         map.addLayer({
-          id: srcId + '-line', type: 'line', source: srcId,
+          id: layerId, type: 'line', source: srcId,
           paint: {
             'line-color': colors[idx % colors.length],
             'line-width': 2,
@@ -127,13 +130,18 @@
           }
         });
       });
+      gpxLayerIds.forEach(function (layerId) {
+        map.on('mouseenter', layerId, function (e) { if (!isOverPoint(e)) showTooltip(e); });
+        map.on('mouseleave', layerId, hideTooltip);
+        map.on('click', layerId, function (e) { if (!isOverPoint(e)) showPopup(e); });
+      });
 
       var tooltip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, className: 'map-tooltip' });
 
       function showTooltip(e) {
         map.getCanvas().style.cursor = 'pointer';
         var f = e.features[0];
-        tooltip.setLngLat(f.geometry.coordinates)
+        tooltip.setLngLat(e.lngLat)
           .setText(f.properties.name)
           .addTo(map);
       }
@@ -145,7 +153,7 @@
         var f = e.features[0];
         tooltip.remove();
         new maplibregl.Popup({ className: 'map-popup' })
-          .setLngLat(f.geometry.coordinates)
+          .setLngLat(e.lngLat)
           .setHTML('<b>' + f.properties.name + '</b><br>' + (f.properties.description || ''))
           .addTo(map);
       }
@@ -155,6 +163,14 @@
         map.on('mouseleave', layer, hideTooltip);
         map.on('click', layer, showPopup);
       });
+
+      function isOverPoint(e) {
+        return map.queryRenderedFeatures(e.point, { layers: ['points', 'point-icons'] }).length > 0;
+      }
+
+      map.on('mouseenter', 'routes', function (e) { if (!isOverPoint(e)) showTooltip(e); });
+      map.on('mouseleave', 'routes', hideTooltip);
+      map.on('click', 'routes', function (e) { if (!isOverPoint(e)) showPopup(e); });
 
       var bounds = new maplibregl.LngLatBounds();
       var allGeoJson = [data].concat(parsedGpx);
