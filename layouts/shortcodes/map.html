@@ -1,6 +1,7 @@
 {{ $geojson := .Get "geojson" }}
 {{ $height := .Get "height" | default "450px" }}
 {{ $id := printf "map-%s" ($geojson | md5) }}
+{{ $staticMap := replace $geojson ".geojson" "-map.png" }}
 
 {{/* GPX-Tracks aus demselben Verzeichnis wie die GeoJSON-Datei */}}
 {{ $dir := path.Dir $geojson }}
@@ -38,6 +39,7 @@
 </style>
 <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
 
+<div class="map-interactive">
 <div id="{{ $id }}" style="height: {{ $height }}; width: 100%;"></div>
 
 <script>
@@ -188,3 +190,9 @@
   });
 }());
 </script>
+</div><!-- .map-interactive -->
+{{ if fileExists (printf "static%s" $staticMap) }}
+<div class="map-print">
+  <img src="{{ $staticMap }}" alt="Karte" style="width:100%;">
+</div>
+{{ end }}
